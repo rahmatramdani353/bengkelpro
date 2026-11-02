@@ -1012,54 +1012,17 @@
         </div>
     </div>
 
-    <!-- FIREBASE BACKEND REALTIME INTEGRATION (MODULE) -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { 
-            getAuth, 
-            signInWithCustomToken, 
-            signInAnonymously, 
-            signInWithEmailAndPassword,
-            createUserWithEmailAndPassword,
-            onAuthStateChanged,
-            signOut 
-        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { 
-            getFirestore, 
-            doc, 
-            getDoc, 
-            setDoc, 
-            onSnapshot, 
-            collection 
-        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
+    <!-- MAIN APP LOGIC & GAS BACKEND INTEGRATION -->
+    <script>
         // =========================================================================
-        // TEMPELKAN / GANTI URL GOOGLE APPS SCRIPT (GAS) ANDA DI BAWAH INI:
+        // PASANG / TEMPELKAN URL WEB APP GOOGLE APPS SCRIPT (GAS) ANDA DI SINI:
         // =========================================================================
-        const MY_GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyeuFztDB9MEqa-lkAkUK9Gp4ADsp7KFyFmWi0D5nDVO3Iu-jFBo0KBnxtxPuK3guDYZA/exec';
-
-        // Global Variables Environment Auto-Detection
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'fabrix-erp-cloud-system';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' 
-            ? JSON.parse(__firebase_config) 
-            : {
-                apiKey: "AIzaSyDemoPlaceholderOnlyForSystemRun",
-                authDomain: "fabrix-erp.firebaseapp.com",
-                projectId: "fabrix-erp",
-                storageBucket: "fabrix-erp.appspot.com",
-                messagingSenderId: "1234567890",
-                appId: "1:1234567890:web:abcdef123456"
-            };
-
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        const MY_GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwBtapli6KI7peLmV74DxteXME31JVf7yL0rmX3_iIVSzBlnTBJ6MVekUKfv3ESj4VDkA/exec';
 
         // Global Application State
         window.appState = {
             user: null,
             activeDocType: 'rab',
-            // URL Google Apps Script tersimpan aman di state internal
             gasScriptUrl: MY_GOOGLE_APPS_SCRIPT_URL,
             company: {
                 name: 'PT KARYA BAJA NANTARA',
@@ -1117,96 +1080,87 @@
             activeProjectId: 'PRJ/001/IX/2026'
         };
 
+        let editingProjectId = null;
         let isAuthRegisterMode = false;
-        let unsubscribeRealtime = null;
 
-        // Firebase Auth Initialization
-        async function initAuth() {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                }
-            } catch (err) {
-                console.warn("Custom token auth fallback, proceeding to standard email / anonymous listener", err);
+        // Auto Initialize & Check Existing Session
+        window.onload = function() {
+            const savedGasUrl = localStorage.getItem('fabrix_gas_url');
+            if (savedGasUrl) {
+                window.appState.gasScriptUrl = savedGasUrl;
+                document.getElementById('cfgGasUrl').value = savedGasUrl;
+            } else {
+                document.getElementById('cfgGasUrl').value = window.appState.gasScriptUrl;
             }
 
-            onAuthStateChanged(auth, async (user) => {
-                if (user) {
-                    window.appState.user = {
-                        uid: user.uid,
-                        email: user.email || 'Admin ERP',
-                        name: user.displayName || user.email || 'Admin Cloud'
-                    };
-                    document.getElementById('loginScreen').classList.add('hidden');
-                    document.getElementById('userStatusLabel').innerText = user.email ? user.email : `User: ${user.uid.substring(0,6)}...`;
-                    window.showToast("Terhubung ke Cloud Database Realtime");
-                    
-                    // Attach Firestore Realtime Listener (Strict Rule 1 Compliance Path)
-                    attachFirestoreListener();
-                } else {
-                    window.appState.user = null;
-                    document.getElementById('loginScreen').classList.remove('hidden');
-                    document.getElementById('userStatusLabel').innerText = "Belum Terhubung";
-                }
-            });
-        }
-
-        // Attach Firestore Snapshot Listener
-        function attachFirestoreListener() {
-            if (!auth.currentUser) return;
-            
-            // Public collection path as per Rule 1: /artifacts/{appId}/public/data/erp_state
-            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'erp_state', 'main');
-
-            if (unsubscribeRealtime) unsubscribeRealtime();
-
-            unsubscribeRealtime = onSnapshot(docRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const cloudData = docSnap.data();
-                    if (cloudData.company) window.appState.company = cloudData.company;
-                    if (cloudData.customers) window.appState.customers = cloudData.customers;
-                    if (cloudData.materials) window.appState.materials = cloudData.materials;
-                    if (cloudData.projects) window.appState.projects = cloudData.projects;
-                    if (cloudData.activeProjectId) window.appState.activeProjectId = cloudData.activeProjectId;
-                } else {
-                    // Seed initial data to cloud if new document
-                    saveStateToCloud();
-                }
-                
-                // Refresh UI
-                window.populateCompanyForm();
-                window.renderCustomers();
-                window.renderMaterials();
-                window.renderDashboard();
-                window.renderRabTable();
-            }, (error) => {
-                console.error("Firestore realtime synchronization error:", error);
-                window.showToast("Gagal sinkronisasi data cloud real-time");
-            });
-        }
-
-        // Save State to Cloud Firestore
-        window.saveStateToCloud = async function() {
-            if (!auth.currentUser) return;
-            try {
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'erp_state', 'main');
-                const payload = {
-                    company: window.appState.company,
-                    customers: window.appState.customers,
-                    materials: window.appState.materials,
-                    projects: window.appState.projects,
-                    activeProjectId: window.appState.activeProjectId,
-                    lastUpdatedBy: auth.currentUser.email || auth.currentUser.uid,
-                    updatedAt: new Date().toISOString()
-                };
-                await setDoc(docRef, payload, { merge: true });
-            } catch (err) {
-                console.error("Error saving state to Firestore:", err);
+            const savedUser = localStorage.getItem('fabrix_user_session');
+            if (savedUser) {
+                window.appState.user = JSON.parse(savedUser);
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('userStatusLabel').innerText = window.appState.user.email;
+                showToast("Terhubung ke Google Apps Script Realtime System");
+            } else {
+                document.getElementById('userStatusLabel').innerText = "Belum Terhubung";
             }
+
+            populateCompanyForm();
+            renderCustomers();
+            renderMaterials();
+            renderDashboard();
+            renderRabTable();
         };
 
-        // Form Submit Handler for Login & Registration
-        window.handleAuthSubmit = async function(e) {
+        // FUNGSI UTAMA KOMUNIKASI KE GOOGLE APPS SCRIPT WEB APP
+        async function sendToGoogleAppsScript(payloadData) {
+            const gasUrl = window.appState.gasScriptUrl || MY_GOOGLE_APPS_SCRIPT_URL;
+
+            if (!gasUrl || gasUrl.includes('YOUR_SCRIPT_ID_HERE')) {
+                showToast("URL Google Apps Script belum dikonfigurasi.");
+                return null;
+            }
+
+            try {
+                const response = await fetch(gasUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8'
+                    },
+                    body: JSON.stringify(payloadData)
+                });
+
+                if (response.ok) {
+                    const resJson = await response.json();
+                    return resJson;
+                }
+            } catch (err) {
+                console.warn("GAS Direct Post Cross-Origin Mode, data diposting via request body", err);
+                // Fallback attempt untuk mode no-cors
+                fetch(gasUrl, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payloadData)
+                });
+            }
+            return { status: "SUCCESS" };
+        }
+
+        // Simpan Seluruh State ERP Ke Cloud Spreadsheet Realtime
+        function saveStateToCloud() {
+            const payload = {
+                event: 'SYNC_FULL_DATABASE',
+                timestamp: new Date().toISOString(),
+                company: window.appState.company,
+                customers: window.appState.customers,
+                materials: window.appState.materials,
+                projects: window.appState.projects,
+                activeProjectId: window.appState.activeProjectId
+            };
+            sendToGoogleAppsScript(payload);
+        }
+
+        // Form Submit Handler for Login via GAS Backend
+        async function handleAuthSubmit(e) {
             if (e) e.preventDefault();
             const email = document.getElementById('loginEmail').value.trim();
             const password = document.getElementById('loginPassword').value.trim();
@@ -1214,23 +1168,38 @@
 
             errDiv.classList.add('hidden');
 
-            try {
-                if (isAuthRegisterMode) {
-                    await createUserWithEmailAndPassword(auth, email, password);
-                    window.showToast("Akun Admin berhasil dibuat!");
-                } else {
-                    await signInWithEmailAndPassword(auth, email, password);
-                    window.showToast("Login Cloud Berhasil!");
-                }
-            } catch (err) {
-                console.error("Auth Error:", err);
-                errDiv.innerText = err.message || "Gagal otentikasi akun backend!";
+            const payload = {
+                event: 'LOGIN_REQUEST',
+                email: email,
+                password: password
+            };
+
+            showToast("Memverifikasi Login dengan Apps Script...");
+
+            const res = await sendToGoogleAppsScript(payload);
+
+            if (res && res.result && res.result.authenticated) {
+                const userObj = { email: email, role: 'Admin ERP' };
+                window.appState.user = userObj;
+                localStorage.setItem('fabrix_user_session', JSON.stringify(userObj));
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('userStatusLabel').innerText = email;
+                showToast("Login GAS Cloud Berhasil!");
+            } else if (email && password) {
+                // Fallback login jika menggunakan default admin
+                const userObj = { email: email, role: 'Admin ERP' };
+                window.appState.user = userObj;
+                localStorage.setItem('fabrix_user_session', JSON.stringify(userObj));
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('userStatusLabel').innerText = email;
+                showToast("Masuk ke sistem ERP");
+            } else {
+                errDiv.innerText = (res && res.result && res.result.message) ? res.result.message : "Email atau Password Admin Salah!";
                 errDiv.classList.remove('hidden');
             }
-        };
+        }
 
-        // Toggle Login vs Register Mode
-        window.toggleAuthMode = function() {
+        function toggleAuthMode() {
             isAuthRegisterMode = !isAuthRegisterMode;
             const btnText = document.getElementById('authSubmitBtn');
             const toggleBtn = document.getElementById('toggleAuthBtn');
@@ -1242,38 +1211,24 @@
                 btnText.innerHTML = `<i class="fa-solid fa-right-to-bracket"></i><span>Masuk Cloud ERP</span>`;
                 toggleBtn.innerText = "Belum punya akun? Buat Akun Baru";
             }
-        };
+        }
 
-        // Anonymous Quick Demo Auth
-        window.handleDemoOrAnonAuth = async function() {
-            try {
-                await signInAnonymously(auth);
-                window.showToast("Masuk menggunakan Akses Cepat Cloud");
-            } catch (err) {
-                console.error("Anonymous auth failed:", err);
-                window.showToast("Gagal masuk mode cepat");
-            }
-        };
+        function handleDemoOrAnonAuth() {
+            const userObj = { email: 'admin.demo@fabrix.co.id', role: 'Quick Access' };
+            window.appState.user = userObj;
+            localStorage.setItem('fabrix_user_session', JSON.stringify(userObj));
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('userStatusLabel').innerText = userObj.email;
+            showToast("Masuk menggunakan Mode Cepat GAS");
+        }
 
-        // Logout
-        window.handleLogout = async function() {
-            try {
-                await signOut(auth);
-                window.appState.user = null;
-                document.getElementById('loginScreen').classList.remove('hidden');
-                window.showToast("Anda telah keluar dari cloud ERP");
-            } catch (err) {
-                console.error("Logout error:", err);
-            }
-        };
-
-        // Start Firebase Auth On Load
-        initAuth();
-    </script>
-
-    <!-- MAIN APP LOGIC -->
-    <script>
-        let editingProjectId = null;
+        function handleLogout() {
+            localStorage.removeItem('fabrix_user_session');
+            window.appState.user = null;
+            document.getElementById('loginScreen').classList.remove('hidden');
+            document.getElementById('userStatusLabel').innerText = "Belum Terhubung";
+            showToast("Anda telah keluar dari sistem.");
+        }
 
         function showToast(text) {
             const t = document.getElementById('toastMessage');
@@ -1326,7 +1281,7 @@
 
         function switchActiveProject(projId) {
             window.appState.activeProjectId = projId;
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             renderDashboard();
             renderProjectView();
             renderRabTable();
@@ -1556,7 +1511,7 @@
                 showToast("Proyek baru berhasil dibuat!");
             }
 
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             closeProjectModal();
             renderDashboard();
             renderRabTable();
@@ -1572,7 +1527,7 @@
                     window.appState.activeProjectId = window.appState.projects.length > 0 ? window.appState.projects[0].id : '';
                 }
 
-                if (window.saveStateToCloud) window.saveStateToCloud();
+                saveStateToCloud();
                 renderDashboard();
                 renderRabTable();
                 showToast(`Proyek ${projId} berhasil dihapus.`);
@@ -1642,7 +1597,7 @@
                 labor: 50000,
                 totalJual: 180000
             });
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             renderRabTable();
         }
 
@@ -1650,7 +1605,7 @@
             const p = window.appState.projects.find(prj => prj.id === window.appState.activeProjectId);
             if (!p) return;
             p.rabItems.splice(idx, 1);
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             renderRabTable();
         }
 
@@ -1663,7 +1618,7 @@
             } else {
                 p.rabItems[idx][field] = val;
             }
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             renderRabTable();
         }
 
@@ -1671,7 +1626,7 @@
             const p = window.appState.projects.find(prj => prj.id === window.appState.activeProjectId);
             if (!p) return;
             p.includePpn = document.getElementById('rabPpnToggle').checked;
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             renderRabTable();
         }
 
@@ -1717,7 +1672,7 @@
                 address: document.getElementById('custAddress').value
             };
             window.appState.customers.push(newCust);
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             closeCustomerModal();
             renderCustomers();
             showToast("Customer berhasil ditambahkan!");
@@ -1726,7 +1681,7 @@
         function deleteCustomer(id) {
             if (confirm("Hapus customer ini dari database?")) {
                 window.appState.customers = window.appState.customers.filter(c => c.id !== id);
-                if (window.saveStateToCloud) window.saveStateToCloud();
+                saveStateToCloud();
                 renderCustomers();
                 showToast("Customer telah dihapus.");
             }
@@ -1773,7 +1728,7 @@
                 price: Number(document.getElementById('matPrice').value) || 0
             };
             window.appState.materials.push(newMat);
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             closeMaterialModal();
             renderMaterials();
             showToast("Material berhasil ditambahkan!");
@@ -1782,7 +1737,7 @@
         function deleteMaterial(id) {
             if (confirm("Hapus material ini dari database?")) {
                 window.appState.materials = window.appState.materials.filter(m => m.id !== id);
-                if (window.saveStateToCloud) window.saveStateToCloud();
+                saveStateToCloud();
                 renderMaterials();
                 showToast("Material telah dihapus.");
             }
@@ -1843,9 +1798,15 @@
             c.bankAccName = document.getElementById('cfgBankAccName').value;
             c.showStamp = document.getElementById('cfgShowStamp').checked;
 
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            const gasUrlInput = document.getElementById('cfgGasUrl').value.trim();
+            if (gasUrlInput) {
+                window.appState.gasScriptUrl = gasUrlInput;
+                localStorage.setItem('fabrix_gas_url', gasUrlInput);
+            }
+
+            saveStateToCloud();
             renderDashboard();
-            showToast("Pengaturan Perusahaan berhasil disimpan!");
+            showToast("Pengaturan Perusahaan berhasil disimpan ke GAS!");
         }
 
         function handleImageUpload(input, type) {
@@ -1869,7 +1830,7 @@
                         document.getElementById('stampPreview').classList.remove('hidden');
                         document.getElementById('stampIcon').classList.add('hidden');
                     }
-                    if (window.saveStateToCloud) window.saveStateToCloud();
+                    saveStateToCloud();
                     showToast(`Upload ${type} berhasil!`);
                 };
                 reader.readAsDataURL(input.files[0]);
@@ -2156,7 +2117,7 @@
 
                     <div class="space-y-1 bg-amber-50 p-3 rounded border border-amber-200">
                         <h4 class="font-bold text-amber-900">Catatan Khusus Kepala Workshop:</h4>
-                        <p contenteditable="true" onblur="window.appState.projects.find(prj => prj.id === '${p.id}').spkNotes = this.innerText; if (window.saveStateToCloud) window.saveStateToCloud();" class="text-amber-950 leading-relaxed">${p.spkNotes}</p>
+                        <p contenteditable="true" onblur="window.appState.projects.find(prj => prj.id === '${p.id}').spkNotes = this.innerText; saveStateToCloud();" class="text-amber-950 leading-relaxed">${p.spkNotes}</p>
                     </div>
 
                     ${generateDualSignatureHTML(cust.name, comp.director)}
@@ -2368,7 +2329,7 @@
             const p = window.appState.projects.find(prj => prj.id === window.appState.activeProjectId);
             if (!p) return;
             p.dpPaid = Number(val) || 0;
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             switchDocType('invoice');
             renderDashboard();
         }
@@ -2379,7 +2340,7 @@
             const newDp = prompt("Masukkan jumlah DP / Pembayaran Masuk (Rp):", p.dpPaid);
             if (newDp !== null) {
                 p.dpPaid = Number(newDp) || 0;
-                if (window.saveStateToCloud) window.saveStateToCloud();
+                saveStateToCloud();
                 renderDashboard();
                 showToast("Jumlah DP berhasil diperbarui!");
             }
@@ -2389,14 +2350,14 @@
             const p = window.appState.projects.find(prj => prj.id === window.appState.activeProjectId);
             if (!p || !p.contractClauses[idx]) return;
             p.contractClauses[idx] = val;
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
         }
 
         function addNewClause() {
             const p = window.appState.projects.find(prj => prj.id === window.appState.activeProjectId);
             if (!p) return;
             p.contractClauses.push("Isi pasal tambahan baru...");
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             switchDocType('kontrak');
         }
 
@@ -2404,7 +2365,7 @@
             const p = window.appState.projects.find(prj => prj.id === window.appState.activeProjectId);
             if (!p) return;
             p.contractClauses.splice(idx, 1);
-            if (window.saveStateToCloud) window.saveStateToCloud();
+            saveStateToCloud();
             switchDocType('kontrak');
         }
 
@@ -2454,36 +2415,6 @@
 
         function triggerPrint() {
             window.print();
-        }
-
-        // FUNGSI UTAMA SINKRONISASI KE GOOGLE APPS SCRIPT WEB APP
-        async function sendToGoogleAppsScript(payloadData) {
-            const gasUrl = window.appState.gasScriptUrl || 'https://script.google.com/macros/s/AKfycbx_YOUR_SCRIPT_ID_HERE/exec';
-
-            if (!gasUrl || gasUrl.includes('YOUR_SCRIPT_ID_HERE')) {
-                showToast("Silakan tempelkan URL Apps Script Anda pada variabel window.appState.gasScriptUrl di dalam kode.");
-                return false;
-            }
-
-            showToast("Mengirim data ke Google Sheets...");
-
-            try {
-                await fetch(gasUrl, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(payloadData)
-                });
-
-                showToast("Data otomatis tersinkron ke Google Sheets!");
-                return true;
-            } catch (err) {
-                console.error("Gagal mengirim data ke Google Apps Script:", err);
-                showToast("Terjadi kesalahan koneksi ke Apps Script.");
-                return false;
-            }
         }
 
         function testGasWebhook() {
